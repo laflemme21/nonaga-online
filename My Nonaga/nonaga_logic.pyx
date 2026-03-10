@@ -214,6 +214,8 @@ cdef class NonagaLogic:
     cdef NonagaLogic move_tile_ai(self, NonagaTile tile, tuple destination):
         cdef NonagaLogic new_self = self.clone()
         cdef NonagaTile new_tile = new_self.board.get_tile((tile.q, tile.r, tile.s))
+        if new_tile is None:
+            raise ValueError(f"Invalid AI tile move source: tile {(tile.q, tile.r, tile.s)} not found in cloned board")
         if new_self.turn_phase == TILE_TO_MOVE:
             new_self.board.move_tile(new_tile, destination)
             new_self._next_turn_phase()
@@ -224,6 +226,8 @@ cdef class NonagaLogic:
     cdef NonagaLogic move_piece_ai(self, NonagaPiece piece, tuple destination):
         cdef NonagaLogic new_self = self.clone()
         cdef NonagaPiece new_piece = new_self.board.get_piece((piece.q, piece.r, piece.s))
+        if new_piece is None:
+            raise ValueError(f"Invalid AI piece move source: piece {(piece.q, piece.r, piece.s)} not found in cloned board")
         if new_self.turn_phase == PIECE_TO_MOVE and new_self.current_player == new_piece.color:
             new_self.board.move_piece(new_piece, destination)
             new_self._next_turn_phase()
@@ -253,6 +257,9 @@ cdef class NonagaLogic:
             pieces = [(p.q, p.r, p.s) for p in self.board.get_pieces(RED)]
         else:
             pieces = [(p.q, p.r, p.s) for p in self.board.get_pieces(BLACK)]
+
+        if len(pieces) == 0:
+            return False
 
         cdef set piece_set = set(pieces)
         cdef tuple start = <tuple>pieces[0]

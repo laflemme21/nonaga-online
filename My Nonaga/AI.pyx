@@ -4,6 +4,9 @@ from nonaga_logic cimport NonagaLogic
 from nonaga_board cimport NonagaBoard, NonagaIsland, NonagaPiece, NonagaTile
 import json
 import os
+import faulthandler
+
+faulthandler.enable()
 
 # Module-level constants for alpha-beta bounds
 cdef double NEG_INF = float('-inf')
@@ -25,14 +28,20 @@ cdef class AI:
     cdef tuple minimax_piece(self, NonagaLogic game_state, int depth, bint maximizingPlayer, int color, double alpha, double beta):
         """Moves a piece in the minimax algorithm then calls minimax_tile."""
 
-        cdef double value, tmp
-        cdef tuple original_position, best_piece_move, best_tile_move, candidate_tile_move
-        cdef dict all_possible_piece_moves
+        cdef double value = 0
+        cdef double tmp = 0
+        cdef tuple original_position = None
+        cdef tuple best_piece_move = None
+        cdef tuple best_tile_move = None
+        cdef tuple candidate_tile_move = None
+        cdef dict all_possible_piece_moves = {}
         cdef NonagaPiece piece
-        cdef tuple move
+        cdef tuple move = None
         cdef NonagaLogic child
 
         # end of the loop
+        if depth <= 0:
+            return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None, None)
         if game_state.check_win_condition(RED) or game_state.check_win_condition(BLACK):
             # the last player to play won
             if maximizingPlayer:
@@ -40,13 +49,12 @@ cdef class AI:
             else:
                 return (99999999, None, None)
          
-        cost = self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter)
-        
-                
         # AI's turn
         if maximizingPlayer:
             value = NEG_INF
             all_possible_piece_moves = game_state.get_all_valid_piece_moves_ai()
+            if not all_possible_piece_moves:
+                return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None, None)
             # move ordering
             all_possible_piece_moves = self.piece_move_ordering(maximizingPlayer, all_possible_piece_moves, game_state)
             for piece in all_possible_piece_moves:
@@ -71,6 +79,8 @@ cdef class AI:
         else:
             value = POS_INF
             all_possible_piece_moves = game_state.get_all_valid_piece_moves_ai()
+            if not all_possible_piece_moves:
+                return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None, None)
             # move ordering
             all_possible_piece_moves = self.piece_move_ordering(maximizingPlayer, all_possible_piece_moves, game_state)
             for piece in all_possible_piece_moves:
@@ -91,6 +101,9 @@ cdef class AI:
                     continue
                 break
 
+        if best_piece_move is None or best_tile_move is None:
+            return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None, None)
+
         return (value, best_piece_move, best_tile_move)
 
     cdef tuple minimax_tile(self, NonagaLogic game_state, int depth, bint maximizingPlayer, int color, double alpha, double beta):
@@ -98,15 +111,20 @@ cdef class AI:
         # We don't evaluate the game state after a piece move because the depth is only decreased after a tile move, which is the end of a turn.
         # So we only evaluate the game state at the end of a turn, which is more efficient.
 
-        cdef double value, tmp
-        cdef tuple original_position, best_tile_move, result
-        cdef dict all_possible_tile_moves
+        cdef double value = 0
+        cdef double tmp = 0
+        cdef tuple original_position = None
+        cdef tuple best_tile_move = None
+        cdef tuple result = None
+        cdef dict all_possible_tile_moves = {}
         cdef NonagaTile tile
-        cdef tuple move
+        cdef tuple move = None
         cdef NonagaLogic child
 
         # tile moves are independant of the current player
         all_possible_tile_moves = game_state.get_all_valid_tile_moves_ai()
+        if not all_possible_tile_moves:
+            return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None)
         # move ordering
         all_possible_tile_moves = self.tile_move_ordering(maximizingPlayer, all_possible_tile_moves, game_state)
 
@@ -152,39 +170,42 @@ cdef class AI:
                     continue
                 break
 
+        if best_tile_move is None:
+            return (self.cost_function(game_state, maximizingPlayer, self.max_color, self.parameter), None)
+
         return (value, best_tile_move)
 
     cdef dict piece_move_ordering(self, bint maximizing_player,dict moves,NonagaLogic game_state):
-        move_dict = {}
+        cdef dict move_dict = {}
+        cdef dict ordered_moves = {}
+        cdef NonagaPiece piece
+        cdef tuple dest
+        cdef NonagaLogic child_state
         for piece in moves:
             move_dict[piece] = {}
-            initial_pos = piece.get_position()
             for dest in moves[piece]:
-                game_state.board.move_piece(piece, dest)
-                cost = self.cost_function(game_state, maximizing_player, self.max_color, self.parameter)
-                game_state.board.move_piece(piece, initial_pos)
+                child_state = game_state.move_piece_ai(piece, dest)
+                cost = self.cost_function(child_state, maximizing_player, self.max_color, self.parameter)
                 move_dict[piece][dest] = cost
-            move_dict[piece] = [k for k in sorted(move_dict[piece], key=move_dict[piece].get, reverse=maximizing_player)]
-        move_dict = {k for k in sorted(move_dict, key=lambda x : move_dict[x][0], reverse=maximizing_player)}
-        
+            ordered_moves[piece] = [k for k in sorted(move_dict[piece], key=move_dict[piece].get, reverse=maximizing_player)]
 
-        return moves
+        return ordered_moves
 
     cdef dict tile_move_ordering(self,bint maximizing_player,dict moves,NonagaLogic game_state):
-        move_dict = {}
+        cdef dict move_dict = {}
+        cdef dict ordered_moves = {}
+        cdef NonagaTile tile
+        cdef tuple dest
+        cdef NonagaLogic child_state
         for tile in moves:
             move_dict[tile] = {}
-            initial_pos = tile.get_position()
             for dest in moves[tile]:
-                game_state.board.move_tile(tile, dest)
-                cost = self.cost_function(game_state, maximizing_player, self.max_color, self.parameter)
-                game_state.board.move_tile(tile, initial_pos)
+                child_state = game_state.move_tile_ai(tile, dest)
+                cost = self.cost_function(child_state, maximizing_player, self.max_color, self.parameter)
                 move_dict[tile][dest] = cost
-            move_dict[tile] = [k for k in sorted(move_dict[tile], key=move_dict[tile].get, reverse=maximizing_player)]
-        move_dict = {k for k in sorted(move_dict, key=lambda x : move_dict[x][0], reverse=maximizing_player)}
-        
+            ordered_moves[tile] = [k for k in sorted(move_dict[tile], key=move_dict[tile].get, reverse=maximizing_player)]
 
-        return moves
+        return ordered_moves
 
     cdef int cost_function(self, NonagaLogic game_state, bint maximizingPlayer, int max_color, list params):
         # for the AI, bigger better for the player lower better
